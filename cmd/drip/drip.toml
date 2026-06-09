@@ -1,0 +1,140 @@
+# drip — metrics collector configuration
+
+[drip]
+# URL of the running nanotdb server.
+server_url = "http://localhost:8448"
+
+# -----------------------------------------------------------------------------
+# Internal events — drip emits lifecycle and target-state events into the
+# nanotdb events layer. See docs/INTERNAL_EVENTS.md for the full spec.
+# -----------------------------------------------------------------------------
+
+[internal_events]
+# Master switch — turn the whole emitter off without touching individual
+# groups.
+enabled = true
+# Destination database on the target nanotdb. Defaults to "internal"
+# alongside engine stats and engine-side internal events.
+target_db = "internal"
+# Bounded send queue; on overflow drip drops the record and counts it.
+queue_depth = 1024
+
+# Per-group enable overrides. Any group not listed uses its default
+# (see docs/INTERNAL_EVENTS.md). Unknown groups are a hard error at
+# config load.
+[internal_events.groups]
+# "drip.host" = "on"   # uncomment to enable host telemetry events
+
+# Admin HTTP listener (optional). When set, exposes /healthz, /version,
+# and the runtime group toggle at /api/v1/internal-events/groups.
+[admin]
+listen = ""    # "127.0.0.1:9099" enables the listener
+
+# Target database for all collected metrics.
+database = "metrics"
+
+# How often to run a collection cycle (milliseconds).
+collection_interval_ms = 10000
+
+# Maximum time allowed for all collectors to respond per cycle (milliseconds).
+# Collectors that do not push results within this window are skipped for this cycle.
+timeout_ms = 5500
+
+# -----------------------------------------------------------------------------
+# Collectors — enable/disable each metric source.
+# -----------------------------------------------------------------------------
+
+[collectors.cpu]
+# Emits: cpu.user, cpu.nice, cpu.system, cpu.idle, cpu.iowait, cpu.irq, cpu.softirq,
+#        cpu.busy_pct, sys.uptime_sec, cpu.temp_mdeg (if thermal zone is available)
+enabled = true
+# Optional explicit thermal file path (manual override).
+temp_path = "/sys/class/thermal/thermal_zone0/temp"
+# Optional metric name override for CPU temp.
+temp_metric = "temp.cpu"
+
+[collectors.memory]
+# Emits: mem.total, mem.free, mem.available, mem.buffers, mem.cached,
+#        mem.swapcached, mem.swaptotal, mem.swapfree
+enabled = true
+
+[collectors.process]
+# Aggregates processes matched by executable basename.
+# Emits per configured executable:
+#   proc.{exe}.count, proc.{exe}.rss_bytes, proc.{exe}.vsize_bytes, proc.{exe}.cpu_pct
+# CPU is emitted as a per-cycle delta percentage, so the first cycle starts at 0.
+enabled = true
+exe_names = ["drip", "nanotdb"]
+
+[collectors.disk]
+# Emits per physical block device:
+#   disk.{dev}.reads, reads_merged, read_sectors, read_ms,
+#   disk.{dev}.writes, writes_merged, write_sectors, write_ms,
+#   disk.{dev}.io_in_progress, io_ms, io_weighted_ms,
+#   disk.{dev}.busy_pct, iops, read_kbps, write_kbps
+# Emits per mounted filesystem:
+#   diskfs.{mount}.bytes_total, bytes_used, bytes_free, bytes_avail, used_pct
+enabled = true
+
+[collectors.io]
+# Emits: io.pgpgin, io.pgpgout, io.pswpin, io.pswpout
+enabled = true
+
+[collectors.sd_write_probe]
+# Measures write+fsync latency by writing a probe file.
+# Emits metric: disk.sd_write_probe_ms (or custom metric name)
+# Optionally emits an event instead of a metric when latency exceeds
+# event_when_over_ms.
+enabled = true
+# Directory on the target storage. Must be on the disk you want to
+# probe — NOT a tmpfs mount, where fsync is a no-op and the probe
+# would measure RAM latency instead of SD I/O. drip logs a WARN at
+# startup if the chosen directory is on tmpfs.
+directory = "/tmp"
+# Probe payload size in bytes.
+bytes = 32000
+# Run the actual probe every N cycles; last known value is emitted each cycle.
+every_n_cycles = 6
+# Metric name to emit.
+metric = "disk.sd_write_probe_ms"
+# If > 0 and the measured latency is strictly above this threshold,
+# drip emits only an event (no metric sample) for that cycle.
+# 100 ms is a useful default: a healthy SD card probe runs in single-
+# digit ms, so 100 ms reliably catches stalls without spamming.
+event_when_over_ms = 100
+# Event name to emit when over threshold. The default ships under the
+# drip.threshold internal-events group naming scheme; legacy installs
+# can keep the old "disk.sd_write_probe.slow" name if they prefer.
+event_name = "drip.threshold.disk.sd_write_probe.slow"
+
+[collectors.network]
+# Reads /proc/net/dev per-interface byte/packet counters.
+# Emits: net.{iface}.rx_bytes, rx_packets, rx_errors, rx_drop,
+#        net.{iface}.tx_bytes, tx_packets, tx_errors, tx_drop
+enabled = true
+# Interfaces to exclude (loopback is never interesting).
+skip = ["lo", "br-*", "docker*", "enx*"]
+
+[collectors.loadavg]
+# Reads /proc/loadavg.
+# Emits: sys.load1, sys.load5, sys.load15, sys.procs_running, sys.procs_total
+enabled = true
+
+[collectors.onewire]
+# Reads DS18B20 temperature sensors via /sys/bus/w1/devices.
+# Map device IDs to friendly metric name suffixes.
+# Emits: temp.{friendly_name}.mdeg (millidegrees Celsius)
+enabled = true
+# If true, every discovered 28-* sensor under base_path is collected.
+# Unmapped sensors use their device ID as metric suffix.
+auto_discover = true
+# Override only if your sysfs mount differs.
+base_path = "/sys/bus/w1/devices"
+# Drop readings above this value (mdeg C). Useful to ignore DS18B20 error value 85000.
+max_valid_mdeg = 85000
+
+[collectors.onewire.devices]
+
+"28-0120481ddd35" = "office_wet"
+"28-01214506d428" = "out_dry"
+"28-0121450f31ef" = "office_dry"
