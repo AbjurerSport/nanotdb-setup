@@ -1,0 +1,13 @@
+devdata/
+devdata-*/
+.tmp/
+test-data/
+.vscode/
+/node_modules/
+
+# Build artifacts
+/drip
+/nanocli
+/nanotdb
+/deploy.sh
+/scripts/deploy.sh
